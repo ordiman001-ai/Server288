@@ -7,6 +7,17 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
 
 // 2. Основная функция-обработчик для Vercel
 export default async function handler(req, res) {
+    // Установка заголовков CORS в начале, чтобы они применялись ко всем ответам (успех/ошибка)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Обработка CORS preflight (Vercel часто делает это сам, но для надежности)
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
+    }
+
     // Проверка, что запрос пришел методом POST
     if (req.method !== 'POST') {
         res.status(405).send('Method Not Allowed');
@@ -22,17 +33,18 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Тело запроса, которое пришло из вашего index.html (т.е. userQuery, systemPrompt и т.д.)
-        const { userQuery, systemPrompt } = req.body;
+        // Ожидаем получить полный массив истории чата (chatHistory) и systemPrompt
+        const { chatHistory, systemPrompt } = req.body;
 
-        if (!userQuery) {
-            res.status(400).json({ error: 'Missing required field: userQuery' });
+        if (!chatHistory || !Array.isArray(chatHistory) || chatHistory.length === 0) {
+            res.status(400).json({ error: 'Missing or invalid chatHistory array in request body.' });
             return;
         }
 
         // Формирование Payload для Gemini
+        // *** ИСПОЛЬЗУЕМ ВЕСЬ МАССИВ chatHistory для contents ***
         const payload = {
-            contents: [{ parts: [{ text: userQuery }] }],
+            contents: chatHistory,
             tools: [{ "google_search": {} }],
             systemInstruction: {
                 parts: [{ text: systemPrompt || "Ты — Личный Тренер по развитию, который мотивирует, поддерживает и дает полезные советы." }]
@@ -46,14 +58,8 @@ export default async function handler(req, res) {
             body: JSON.stringify(payload)
         });
 
-        // 4. Передача ответа от Gemini обратно клиенту
         const data = await apiResponse.json();
         
-        // 5. Установка заголовков CORS для обеспечения работы в Telegram Mini App
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
         if (!apiResponse.ok) {
              // Возврат ошибок, если Gemini вернул их (например, ошибка 400)
             console.error("Gemini API Error Response:", data);
@@ -61,11 +67,12 @@ export default async function handler(req, res) {
             return;
         }
 
+        // 4. Передача ответа от Gemini обратно клиенту
         res.status(200).json(data);
 
     } catch (error) {
         console.error("Serverless function error:", error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Internal Server Error', message: error.message });
     }
 }
 
